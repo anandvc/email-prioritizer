@@ -7,11 +7,14 @@ export interface ProcessingResult {
   needsReplyCount: number;
   businessCount: number;
   errors: string[];
+  timeoutReached?: boolean;
+  remainingEmails?: number;
 }
 
 export class EmailProcessor {
   private emailService: EmailService;
   private llmService: LLMService;
+  private readonly MAX_PROCESSING_TIME = 45000; // 45 seconds (leave 15s buffer for Vercel's 60s limit)
 
   constructor() {
     this.emailService = new EmailService();
@@ -43,15 +46,29 @@ export class EmailProcessor {
 
       console.log(`Found ${emails.length} emails to process`);
 
-      // Process emails in batches to avoid rate limiting
-      const batchSize = 5;
+      // Process emails with time limit awareness
+      const batchSize = 3; // Reduced batch size for faster processing
       for (let i = 0; i < emails.length; i += batchSize) {
-        const batch = emails.slice(i, i + batchSize);
-        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(emails.length / batchSize)}`);
+        // Check if we're approaching timeout
+        const elapsed = Date.now() - startTime;
+        if (elapsed > this.MAX_PROCESSING_TIME) {
+          console.log(`⏰ Approaching timeout limit (${elapsed}ms). Stopping processing.`);
+          result.timeoutReached = true;
+          result.remainingEmails = emails.length - i;
+          break;
+        }
 
+        const batch = emails.slice(i, i + batchSize);
+        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(emails.length / batchSize)} (${elapsed}ms elapsed)`);
+
+        // Process batch with timeout awareness
         await Promise.all(
           batch.map(async (email) => {
             try {
+              // Check timeout before each email
+              if (Date.now() - startTime > this.MAX_PROCESSING_TIME) {
+                throw new Error('Timeout reached');
+              }
               await this.processEmail(email, result);
             } catch (error) {
               const errorMsg = `Error processing email ${email.uid}: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -61,16 +78,20 @@ export class EmailProcessor {
           })
         );
 
-        // Add delay between batches to be respectful to APIs
-        if (i + batchSize < emails.length) {
-          console.log('Waiting 2 seconds before next batch...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
+        // Reduced delay between batches (500ms instead of 2000ms)
+        if (i + batchSize < emails.length && Date.now() - startTime < this.MAX_PROCESSING_TIME) {
+          console.log('Waiting 500ms before next batch...');
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
 
       const duration = (Date.now() - startTime) / 1000;
       console.log(`Email processing completed in ${duration}s`);
       console.log(`Results: ${result.processedEmails}/${result.totalEmails} processed, ${result.needsReplyCount} need reply, ${result.businessCount} business opportunities`);
+
+      if (result.timeoutReached) {
+        console.log(`⚠️ Processing stopped due to timeout. ${result.remainingEmails} emails remaining.`);
+      }
 
       if (result.errors.length > 0) {
         console.log(`Errors encountered: ${result.errors.length}`);

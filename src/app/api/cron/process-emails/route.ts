@@ -18,7 +18,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log('Starting scheduled email processing...');
+    // Get lookback time from query parameter, default to 16 minutes for frequent processing
+    const url = new URL(request.url);
+    const minutesBack = parseInt(url.searchParams.get('minutes') || '16');
+    const hoursBack = minutesBack / 60; // Convert to hours for the processor
+
+    console.log(`Starting scheduled email processing for last ${minutesBack} minutes...`);
 
     // Check if all required environment variables are set
     const requiredEnvVars = ['GMAIL_USER', 'GMAIL_APP_PASSWORD', 'NVIDIA_API_KEY'];
@@ -36,8 +41,8 @@ export async function GET(request: NextRequest) {
     // Initialize the email processor
     const processor = new EmailProcessor();
 
-    // Process emails from the last 24 hours
-    const result = await processor.processRecentEmails(24);
+    // Process emails from the specified time window
+    const result = await processor.processRecentEmails(hoursBack);
 
     const duration = (Date.now() - startTime) / 1000;
 
@@ -45,17 +50,20 @@ export async function GET(request: NextRequest) {
       success: true,
       timestamp: new Date().toISOString(),
       duration: `${duration}s`,
+      lookbackMinutes: minutesBack,
       result: {
         totalEmails: result.totalEmails,
         processedEmails: result.processedEmails,
         needsReplyCount: result.needsReplyCount,
         businessCount: result.businessCount,
-        errorCount: result.errors.length
+        errorCount: result.errors.length,
+        timeoutReached: result.timeoutReached,
+        remainingEmails: result.remainingEmails
       },
       errors: result.errors.length > 0 ? result.errors : undefined
     };
 
-    console.log('Email processing completed successfully:', response);
+    console.log(`Email processing completed successfully for last ${minutesBack} minutes:`, response);
 
     return NextResponse.json(response);
 
