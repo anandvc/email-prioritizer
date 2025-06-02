@@ -155,14 +155,32 @@ export class EmailService {
       await this.connectImap();
       await this.openInbox();
 
-      // Search for emails from the last N hours
-      const since = new Date();
-      since.setHours(since.getHours() - hoursBack);
-      const sinceString = since.toISOString().split('T')[0]; // YYYY-MM-DD format
+      // Calculate the cutoff time
+      const cutoffTime = new Date();
+      cutoffTime.setHours(cutoffTime.getHours() - hoursBack);
+      console.log(`Looking for emails received after: ${cutoffTime.toISOString()}`);
 
-      // Use correct IMAP search criteria format
-      const searchCriteria = [['SINCE', sinceString]];
-      console.log(`Searching for emails since ${sinceString}`);
+      // For very recent emails (< 24 hours), search recent emails and filter by time
+      // For older emails, use SINCE date search
+      let searchCriteria: (string | string[])[];
+
+      if (hoursBack <= 24) {
+        // Search for emails from today and yesterday to ensure we catch everything
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayString = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+        searchCriteria = [['SINCE', yesterdayString]];
+        console.log(`Searching for emails since ${yesterdayString} (will filter by time after fetching)`);
+      } else {
+        // For longer periods, use date-only search
+        const since = new Date();
+        since.setHours(since.getHours() - hoursBack);
+        const sinceString = since.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+        searchCriteria = [['SINCE', sinceString]];
+        console.log(`Searching for emails since ${sinceString}`);
+      }
 
       const uids = await this.searchEmails(searchCriteria);
 
@@ -171,11 +189,11 @@ export class EmailService {
         return [];
       }
 
-      console.log(`Found ${uids.length} emails to process`);
+      console.log(`Found ${uids.length} emails from IMAP search, now filtering by time...`);
       const emails: EmailData[] = [];
 
       // Process emails in smaller batches to avoid overwhelming the server
-      const batchSize = 5; // Reduced from 10 to be more conservative
+      const batchSize = 5;
       for (let i = 0; i < uids.length; i += batchSize) {
         const batch = uids.slice(i, i + batchSize);
         console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(uids.length / batchSize)} (UIDs: ${batch.join(', ')})`);
@@ -188,14 +206,29 @@ export class EmailService {
             subject: 'Fetch Error',
             from: 'Unknown',
             to: 'Unknown',
-            date: new Date(),
+            date: new Date(0), // Very old date so it gets filtered out
             body: 'Failed to fetch email',
             messageId: `fetch-error-${uid}`
           } as EmailData;
         }));
 
         const batchEmails = await Promise.all(batchPromises);
-        emails.push(...batchEmails);
+
+        // Filter emails by actual receive time
+        const filteredEmails = batchEmails.filter(email => {
+          const emailTime = new Date(email.date);
+          const isRecent = emailTime >= cutoffTime;
+
+          if (isRecent) {
+            console.log(`✅ Email ${email.uid} is recent: ${emailTime.toISOString()} >= ${cutoffTime.toISOString()}`);
+          } else {
+            console.log(`❌ Email ${email.uid} is too old: ${emailTime.toISOString()} < ${cutoffTime.toISOString()}`);
+          }
+
+          return isRecent;
+        });
+
+        emails.push(...filteredEmails);
 
         // Add delay between batches
         if (i + batchSize < uids.length) {
@@ -204,7 +237,7 @@ export class EmailService {
         }
       }
 
-      console.log(`Successfully processed ${emails.length} emails`);
+      console.log(`Successfully processed ${emails.length} emails within the time window (${hoursBack} hours back)`);
       return emails;
     } catch (error) {
       console.error('Error getting recent emails:', error);
