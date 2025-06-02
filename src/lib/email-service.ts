@@ -189,14 +189,14 @@ export class EmailService {
         return [];
       }
 
-      console.log(`Found ${uids.length} emails from IMAP search, now filtering by time...`);
+      console.log(`Found ${uids.length} emails from IMAP search, now fetching and filtering by time...`);
       const emails: EmailData[] = [];
 
-      // Process emails in smaller batches to avoid overwhelming the server
-      const batchSize = 5;
+      // Process emails in larger batches for faster fetching (no delays during fetch)
+      const batchSize = 10; // Increased batch size since we're not adding delays
       for (let i = 0; i < uids.length; i += batchSize) {
         const batch = uids.slice(i, i + batchSize);
-        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(uids.length / batchSize)} (UIDs: ${batch.join(', ')})`);
+        console.log(`Fetching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(uids.length / batchSize)} (UIDs: ${batch.join(', ')})`);
 
         const batchPromises = batch.map(uid => this.fetchEmailData(uid).catch(error => {
           console.error(`Failed to fetch email ${uid}:`, error);
@@ -214,30 +214,26 @@ export class EmailService {
 
         const batchEmails = await Promise.all(batchPromises);
 
-        // Filter emails by actual receive time
+        // Filter emails by actual receive time immediately
         const filteredEmails = batchEmails.filter(email => {
           const emailTime = new Date(email.date);
           const isRecent = emailTime >= cutoffTime;
 
           if (isRecent) {
-            console.log(`✅ Email ${email.uid} is recent: ${emailTime.toISOString()} >= ${cutoffTime.toISOString()}`);
-          } else {
-            console.log(`❌ Email ${email.uid} is too old: ${emailTime.toISOString()} < ${cutoffTime.toISOString()}`);
+            console.log(`✅ Email ${email.uid} is recent: ${emailTime.toISOString()}`);
           }
+          // Don't log old emails to reduce noise
 
           return isRecent;
         });
 
         emails.push(...filteredEmails);
 
-        // Add delay between batches
-        if (i + batchSize < uids.length) {
-          console.log('Waiting 1 second before next batch...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+        // No delay during fetching phase - we want this to be fast
+        // Delays will be added during processing phase in the processor
       }
 
-      console.log(`Successfully processed ${emails.length} emails within the time window (${hoursBack} hours back)`);
+      console.log(`Successfully fetched and filtered ${emails.length} emails within the time window (${hoursBack} hours back)`);
       return emails;
     } catch (error) {
       console.error('Error getting recent emails:', error);
