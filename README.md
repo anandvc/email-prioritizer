@@ -36,7 +36,7 @@ Emails with potential money-making opportunities:
 
 - **Frontend/Backend**: Next.js 15 with TypeScript
 - **Email Processing**: IMAP integration with Gmail
-- **AI Classification**: NVIDIA LLM API (Llama-3.1-nemotron-ultra-253b-v1)
+- **AI Classification**: NVIDIA LLM API (Qwen-3-Next-80B-A3B-Instruct - 10x faster than previous model)
 - **Deployment**: Vercel with cron jobs
 - **Styling**: Tailwind CSS
 

@@ -18,7 +18,7 @@ export class LLMService {
       const prompt = this.buildClassificationPrompt(email);
 
       const completion = await this.openai.chat.completions.create({
-        model: "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+        model: "qwen/qwen3-next-80b-a3b-instruct",
         messages: [
           {
             role: "system",
@@ -38,7 +38,8 @@ export class LLMService {
 
       const response = completion.choices[0]?.message?.content;
       if (!response) {
-        throw new Error('No response from LLM');
+        console.error('LLM API Response:', JSON.stringify(completion, null, 2));
+        throw new Error(`No response from LLM. Full response: ${JSON.stringify(completion)}`);
       }
 
       console.log(`LLM response for email ${email.uid}:`, response);
