@@ -46,8 +46,10 @@ export class EmailProcessor {
 
       console.log(`Found ${emails.length} emails to process`);
 
-      // Process emails sequentially to respect NVIDIA API rate limit (1 request per 2 seconds)
-      for (let i = 0; i < emails.length; i++) {
+      // Process emails in batches to optimize speed while respecting NVIDIA API rate limit (40 req/min)
+      // Batch size of 10 allows processing ~30 emails within 45s timeout with room for safety
+      const batchSize = 10;
+      for (let i = 0; i < emails.length; i += batchSize) {
         // Check if we're approaching timeout
         const elapsed = Date.now() - startTime;
         if (elapsed > this.MAX_PROCESSING_TIME) {
@@ -57,21 +59,30 @@ export class EmailProcessor {
           break;
         }
 
-        const email = emails[i];
-        console.log(`Processing email ${i + 1}/${emails.length} (${elapsed}ms elapsed)`);
+        const batch = emails.slice(i, i + batchSize);
+        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(emails.length / batchSize)} (${batch.length} emails, ${elapsed}ms elapsed)`);
 
-        try {
-          await this.processEmail(email, result);
-        } catch (error) {
-          const errorMsg = `Error processing email ${email.uid}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-          console.error(errorMsg);
-          result.errors.push(errorMsg);
-        }
+        // Process batch in parallel for speed
+        await Promise.all(
+          batch.map(async (email) => {
+            try {
+              // Check timeout before each email
+              if (Date.now() - startTime > this.MAX_PROCESSING_TIME) {
+                throw new Error('Timeout reached');
+              }
+              await this.processEmail(email, result);
+            } catch (error) {
+              const errorMsg = `Error processing email ${email.uid}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+              console.error(errorMsg);
+              result.errors.push(errorMsg);
+            }
+          })
+        );
 
-        // Wait 2 seconds between API calls to respect NVIDIA rate limit (except for last email)
-        if (i < emails.length - 1 && Date.now() - startTime < this.MAX_PROCESSING_TIME) {
-          console.log('Waiting 2 seconds before next email (NVIDIA rate limit)...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
+        // Small delay between batches to stay well under 40 req/min limit
+        // With batch size 10, this gives us ~15-20 req/min, safe margin
+        if (i + batchSize < emails.length && Date.now() - startTime < this.MAX_PROCESSING_TIME) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
         }
       }
 
