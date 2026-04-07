@@ -18,7 +18,7 @@ export class LLMService {
       const prompt = this.buildClassificationPrompt(email);
 
       const completion = await this.openai.chat.completions.create({
-        model: "qwen/qwen3-next-80b-a3b-instruct",
+        model: "nvidia/nemotron-3-super-120b-a12b",
         messages: [
           {
             role: "system",
@@ -29,11 +29,16 @@ export class LLMService {
             content: prompt
           }
         ],
-        temperature: 0.3,
+        temperature: 1,
         top_p: 0.95,
-        max_tokens: 1024,
+        max_tokens: 16384,
         frequency_penalty: 0,
         presence_penalty: 0,
+        // NVIDIA-specific extensions not in OpenAI SDK types
+        ...({
+          reasoning_budget: 16384,
+          chat_template_kwargs: { enable_thinking: true },
+        } as object),
       });
 
       const response = completion.choices[0]?.message?.content;
